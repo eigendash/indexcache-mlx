@@ -154,9 +154,10 @@ def resolve_indices(
         filler = mx.max(mx.where(ok, kept, -1), axis=-1, keepdims=True)
         return mx.where(ok, kept, mx.maximum(filler, 0))[..., :kk]
 
-    # Rank every key: real candidates by descending score (lower position wins
-    # exact ties) and the diagonal first when it is allowed, so the top-k below
-    # is the highest-scoring subset that also contains the query's own key.
+    # Rank every key: the allowed ones by descending score (lower position wins
+    # exact ties), the masked ones last.  Identical keys are exactly the
+    # allowed keys, so no de-duplication step is needed; the shortlist below is
+    # distinct by construction and any hole is padding.
     descending = mx.argsort(-scores, axis=-1)
     rank = mx.argsort(descending, axis=-1).astype(mx.int32)
     rank = mx.where(allowed, rank, 2 * L)
@@ -165,46 +166,19 @@ def resolve_indices(
         rank = mx.where(is_diag & allowed, -1, rank)
     strong = mx.argsort(rank, axis=-1)  # (..., L, L) keys, best first
     rank_full = mx.take_along_axis(rank, strong, axis=-1)
-    keys_full = mx.take_along_axis(
+    keys = mx.take_along_axis(
         mx.broadcast_to(key_row(L, scores.ndim), scores.shape), strong, axis=-1
     )
-    is_real = rank_full < 2 * L
-    # Candidate slots must be real and distinct.  `first` is the slot of the
-    # first occurrence of each key value, so a slot is a duplicate when an
-    # earlier slot already holds the same key.
-    slot = mx.arange(L, dtype=mx.int32).reshape((1,) * (keys_full.ndim - 1) + (L,))
-    first = mx.min(
-        mx.where(
-            keys_full[..., :, None] == keys_full[..., None, :],
-            slot.reshape((1,) * (keys_full.ndim - 2) + (L, 1)),
-            L,
-        ),
-        axis=-2,
-        keepdims=True,
-    )
-    distinct = (first >= slot.reshape((1,) * (keys_full.ndim - 1) + (L,))).reshape(keys_full.shape)
-    take = is_real & distinct
-    # Keep exactly the first kk survivors, in ranking order.  A *stable*
-    # argsort is required: every non-survivor keys to the same value, so an
-    # unstable sort would shuffle real survivors behind them.
-    keep = mx.argsort((1 - take.astype(mx.int32)), axis=-1)
-    pos = mx.cumsum(take.astype(mx.int32), axis=-1).astype(mx.int32) - 1
-    kept_pos = mx.take_along_axis(pos, keep, axis=-1)
-    ok = mx.take_along_axis(take, keep, axis=-1) & (
-        kept_pos < kk
-    )
-    kept_keys = mx.take_along_axis(keys_full, keep, axis=-1)
-    # Present the survivors ascending by key, repeats of the strongest last.
-    final_key = mx.argsort(
-        (1 - ok.astype(mx.int32)) * L + mx.where(ok, kept_keys, 0), axis=-1
-    )
-    idx = mx.take_along_axis(kept_keys, final_key, axis=-1)[..., :kk]
-    ok = mx.take_along_axis(ok, final_key, axis=-1)[..., :kk]
-    # Padding repeats the strongest selected key (the largest index in the
-    # ascending presentation); -1 is the "nothing selected" sentinel, and every
-    # row has at least one selected key.
-    filler = mx.max(mx.where(ok, idx, -1), axis=-1, keepdims=True)
-    return mx.where(ok, idx, mx.maximum(filler, 0))
+    slot = mx.arange(L, dtype=mx.int32).reshape((1,) * (scores.ndim - 1) + (L,))
+    okay = (rank_full < 2 * L) & (slot < kk)
+    idx = mx.where(okay, keys, 0)
+    # Present the survivors ascending; repeats of the strongest one fill the
+    # remaining slots, so a short row never introduces an unchosen key.
+    order = mx.argsort((1 - okay.astype(mx.int32)) * L + idx, axis=-1)
+    idx = mx.take_along_axis(idx, order, axis=-1)[..., :kk]
+    okay = mx.take_along_axis(okay, order, axis=-1)[..., :kk]
+    filler = mx.max(mx.where(okay, idx, -1), axis=-1, keepdims=True)
+    return mx.where(okay, idx, mx.maximum(filler, 0))
 
 
 def gather_selected(x: mx.array, idx: mx.array) -> mx.array:
