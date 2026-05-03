@@ -45,7 +45,9 @@ def indexer_scores(
         scale = 1.0 / (d**0.5)
     logits = mx.matmul(q * scale, mx.swapaxes(k, -1, -2))  # (..., H, Tq, L)
     gated = mx.maximum(logits, 0.0)
-    w = head_weights.reshape((1,) * (gated.ndim - 3) + (head_weights.shape[0], 1, 1))
+    # Gating is non-negative: a negative head weight must not subtract score.
+    w = mx.maximum(head_weights, 0.0)
+    w = w.reshape((1,) * (gated.ndim - 3) + (head_weights.shape[0], 1, 1))
     return mx.sum(gated * w, axis=-3)
 
 
