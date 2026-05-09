@@ -96,6 +96,7 @@ def select_shortlist(
     silently lost.
     """
     L = scores.shape[-1]
+    scores = mx.stop_gradient(scores)
     descending = mx.argsort(-scores, axis=-1)
     rank = mx.argsort(descending, axis=-1).astype(mx.int32)  # slot of each key
     rank = mx.where(allowed, rank, 2 * L)
@@ -132,6 +133,11 @@ def resolve_indices(
     if scores.ndim < 2 or scores.shape[-2] != scores.shape[-1]:
         raise ValueError(f"scores must be (..., L, L), got {scores.shape}")
     L = scores.shape[-1]
+    # Selection is discrete: stop gradients at the entrance of this function so
+    # that the argsort below never reaches MLX's autodiff (which raises
+    # "Cannot calculate VJP with respect to indices" for the gather it lowers
+    # to).  Nothing downstream wants d(indices)/d(weights) anyway.
+    scores = mx.stop_gradient(scores)
     time = time_column(L, scores.ndim)
     j = mx.arange(L).reshape((1,) * (scores.ndim - 1) + (L,))
     if window is not None and window > 0:
@@ -184,17 +190,27 @@ def resolve_indices(
 def gather_selected(x: mx.array, idx: mx.array) -> mx.array:
     """Gather along the key axis: x (B, H, L, d), idx (B, L, kk) -> (B, H, L, kk, d).
 
-    Uses ``take_along_axis`` on a broadcast key axis.  Two alternatives that
-    look equivalent under MLX 0.32.3 are not: flattening to ``(B*H*L, d)`` and
-    fancy-indexing returns zeros for some lazily-built index arrays, and a
-    ``[..., None, :]`` broadcast with ``take_along_axis`` over the wrong axis
-    silently gathers the diagonal for every slot.
+    Gathers from one flat ``(B*H*L, d)`` table with an int32 index, so the
+    backward pass scatters into that table instead of a broadcast ``L x L``
+    buffer.  ``take_along_axis`` is avoided: under MLX 0.32.3 it attempts a VJP
+    through its index argument and the backward pass raises.
     """
-    b, h, L, _d = x.shape
+    b, h, L, d = x.shape
     kk = idx.shape[-1]
-    gi = mx.stop_gradient(idx).reshape(b, 1, L, kk, 1)
-    gi = mx.broadcast_to(gi, (b, h, L, kk, 1))
-    return mx.take_along_axis(x[:, :, None, :, :], gi, axis=3)
+    # One flat (B*H*L, d) table plus an explicit int32 index, materialised with
+    # mx.eval before use.  Both are needed under MLX 0.32.3: take_along_axis
+    # raises during the backward pass ("Cannot calculate VJP with respect to
+    # indices"), and gathering with a *lazy* index built from a broadcast has
+    # been observed to read the wrong rows.
+    table = x.reshape(b * h * L, d)
+    # Row starts in the flat table.  The element at (b, h, q) sits at flat row
+    # (b*H + h)*L + q, so its offset is that index times the row length -- not
+    # the *position within the (b, h, L) grid* times the row length, which
+    # over-counts by a factor of L and silently reads the wrong rows.
+    rows = (mx.arange(b * h * L, dtype=mx.int32) // L) * L
+    rows = rows.reshape(b, h, L, 1)
+    flat_idx = (rows + idx.reshape(b, 1, L, kk)).reshape(-1)
+    return table[flat_idx].reshape(b, h, L, kk, d)
 
 
 class SparseAttention:

@@ -69,8 +69,8 @@ def distillation_kl(
         b = logits.shape[0]
         L = logits.shape[1]
         kk = selected.shape[-1]
-        offsets = (mx.arange(b * L).reshape(b, L, 1) * logits.shape[-1])
-        flat_idx = mx.stop_gradient((offsets + selected).reshape(b * L * kk))
+        offsets = mx.arange(b * L, dtype=mx.int32).reshape(b, L, 1) * logits.shape[-1]
+        flat_idx = mx.stop_gradient((offsets + selected.astype(mx.int32)).reshape(-1))
         logits = logits.reshape(b * L * logits.shape[-1])[flat_idx].reshape(b, L, kk)
         target = target.reshape(b * L * target.shape[-1])[flat_idx].reshape(b, L, kk)
 
@@ -85,6 +85,9 @@ def distillation_kl(
         # this step silently inflates the loss: q's mass sums to 1 over the
         # k keys while p's would not, unless the tail happens to be empty.
         p = p / mx.maximum(mx.sum(p, axis=-1, keepdims=True), eps)
+        # Floor the renormalised target: with a tiny top-k set much of the mass
+        # can fall outside the shortlist, and log(0) would make the loss NaN.
+        p = mx.maximum(p, 1e-9)
 
     if subtract_target_entropy:
         # cross-entropy only: same gradient, zero at p == q

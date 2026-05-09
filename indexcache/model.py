@@ -67,7 +67,13 @@ class AttentionLayer(nn.Module):
         need_dist: bool = False,
         logits: mx.array | None = None,
     ):
-        """Returns ``(output, attention_distribution, indexer_logits)``.
+        """Returns ``(output, mean attention distribution, indexer logits)``.
+
+        The calling loop scores the hidden state once, uses the scores to pick
+        the top-k and passes them in here, so the indexer object itself is never
+        invoked from this method.  A caller that omits ``logits`` gets zeros
+        back, which is cheap and only matters if it wants the distillation
+        target, and that needs the real scores from the loop.
 
         The output uses the sparse path when ``selected`` is given.  When
         ``need_dist`` is set the returned distribution is the full head-averaged
@@ -78,7 +84,7 @@ class AttentionLayer(nn.Module):
         b, L, _ = x.shape
         q, k, v = self._qkv(x)
         if logits is None:
-            logits = self.indexer(x)
+            logits = mx.zeros((b, L, L), dtype=x.dtype)
         if selected is None:
             out, weights = self.attn(q, k, v, None)
         else:
@@ -168,17 +174,21 @@ class IndexCacheModel(nn.Module):
         indices: dict[int, mx.array] = {}
         weights: dict[int, mx.array] = {}
 
+        # The loop already iterates over every layer to update them, so the
+        # indexer is invoked exactly when the pattern says it should be: once
+        # per Full layer, never for a Shared one.
         for layer, block in enumerate(self.blocks):
+            layer_logits = None
             if pattern.is_full(layer):
+                layer_logits = block.attn.indexer(x)
                 cached = resolve_indices(
-                    block.attn.indexer(x),
+                    layer_logits,
                     self.cfg.top_k,
                     window=self.cfg.window,
                 )
-                cache_source = layer
                 if collect_indices:
                     indices[layer] = cached
-            x, w, _logits = block(x, cached, need_dist=collect_weights)
+            x, w, _logits = block(x, cached, need_dist=collect_weights, logits=layer_logits)
             if w is not None:
                 weights[layer] = w
         del cache_source
@@ -196,7 +206,7 @@ class IndexCacheModel(nn.Module):
     def loss(self, tokens: mx.array, pattern: LayerPattern | None = None) -> mx.array:
         """Next-token cross-entropy, averaged over all positions."""
         logits = self.forward(tokens, pattern)["logits"]
-        targets = tokens[:, 1:]
+        targets = mx.stop_gradient(tokens[:, 1:])
         logp = nn.log_softmax(logits[:, :-1].astype(mx.float32), axis=-1)
         picked = mx.take_along_axis(logp, targets[..., None], axis=-1)
         return -mx.mean(picked)
