@@ -35,10 +35,6 @@ def _kl_terms(p: mx.array, log_q: mx.array, eps: float) -> mx.array:
     return mx.sum(p * (log_p - log_q), axis=-1)
 
 
-def _clamp_log_q(logits: mx.array) -> mx.array:
-    return mx.maximum(nn.log_softmax(logits.astype(mx.float32), axis=-1), -100.0)
-
-
 def distillation_kl(
     target: mx.array,
     logits: mx.array,
@@ -61,10 +57,15 @@ def distillation_kl(
 
     Returns ``(loss, n_positions)`` so a caller can weight runs by token count.
     """
-    if target.shape != logits.shape:
-        raise ValueError(f"target {target.shape} != logits {logits.shape}")
-
     if selected is not None:
+        # ``logits`` must span the whole vocabulary: this function gathers the
+        # top-k out of it.  Passing scores already restricted to k keys is a
+        # silent mis-index, so check the width here.
+        if target.shape != logits.shape:
+            raise ValueError(
+                f"with `selected`, target and logits must both be (B, L, S); "
+                f"got {target.shape} and {logits.shape}"
+            )
         axis = logits.ndim - 1
         b = logits.shape[0]
         L = logits.shape[1]
@@ -73,6 +74,9 @@ def distillation_kl(
         flat_idx = mx.stop_gradient((offsets + selected.astype(mx.int32)).reshape(-1))
         logits = logits.reshape(b * L * logits.shape[-1])[flat_idx].reshape(b, L, kk)
         target = target.reshape(b * L * target.shape[-1])[flat_idx].reshape(b, L, kk)
+
+    if target.shape != logits.shape:
+        raise ValueError(f"target {target.shape} != logits {logits.shape}")
 
     # -1e30 masking logits make log_softmax return -inf; clamp after the normaliser
     # so p * log q stays finite.
@@ -87,11 +91,19 @@ def distillation_kl(
         p = p / mx.maximum(mx.sum(p, axis=-1, keepdims=True), eps)
         # Floor the renormalised target: with a tiny top-k set much of the mass
         # can fall outside the shortlist, and log(0) would make the loss NaN.
+        # The floor is applied *before* the final renormalisation so the result
+        # is still a distribution.
         p = mx.maximum(p, 1e-9)
+        p = p / mx.maximum(mx.sum(p, axis=-1, keepdims=True), eps)
 
     if subtract_target_entropy:
-        # cross-entropy only: same gradient, zero at p == q
-        terms = -mx.sum(p * log_q, axis=-1)
+        # Cross-entropy minus the target's own (constant) negative entropy: the
+        # same gradient with respect to the indexer, but the value is exactly
+        # zero when the indexer's distribution already equals the target.
+        # Subtracting H(p) = -sum p log p cannot change the gradient because
+        # nothing in that term depends on the indexer parameters.
+        log_p = mx.log(mx.maximum(p, eps))
+        terms = mx.sum(p * (log_p - log_q), axis=-1)
     else:
         terms = _kl_terms(p, log_q, eps)
 
@@ -138,7 +150,7 @@ def multi_layer_distillation_loss(
         )
         return loss
 
-    total = mx.array(0.0)
+    total = None
     for j in range(targets.shape[0]):
         loss, _ = distillation_kl(
             targets[j],
@@ -147,5 +159,5 @@ def multi_layer_distillation_loss(
             mask=mask,
             subtract_target_entropy=subtract_target_entropy,
         )
-        total = total + loss
+        total = loss if total is None else total + loss
     return total / targets.shape[0]
