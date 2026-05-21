@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import mlx.core as mx
 import mlx.nn as nn
+import numpy as np
 
 _EPS = 1e-12
 
@@ -42,6 +43,7 @@ def distillation_kl(
     selected: mx.array | None = None,
     mask: mx.array | None = None,
     subtract_target_entropy: bool = True,
+    normalise: bool = False,
     eps: float = 1e-9,
 ) -> tuple[mx.array, mx.array]:
     """KL(target || softmax(logits)) averaged over positions.
@@ -54,6 +56,9 @@ def distillation_kl(
     With ``subtract_target_entropy`` the returned value is the cross-entropy
     term alone (constant offset removed), so it is exactly zero when the model
     distribution already equals the target *and* its gradient is unchanged.
+    ``normalise`` divides the result by ``log(S)``, which keeps the term in
+    [0, 1] so that it can be added to a language-modelling loss whose scale is
+    set by the vocabulary rather than by the attention distribution.
 
     Returns ``(loss, n_positions)`` so a caller can weight runs by token count.
     """
@@ -112,7 +117,10 @@ def distillation_kl(
         n = mx.sum(mask.astype(mx.float32))
     else:
         n = float(terms.size)
-    return mx.sum(terms) / mx.maximum(n, 1.0), n
+    loss = mx.sum(terms) / mx.maximum(n, 1.0)
+    if normalise:
+        loss = loss / float(np.log(max(logits.shape[-1], 2)))
+    return loss, n
 
 
 def multi_layer_distillation_loss(
@@ -123,6 +131,7 @@ def multi_layer_distillation_loss(
     mask: mx.array | None = None,
     mode: str = "per_layer",
     subtract_target_entropy: bool = True,
+    normalise: bool = True,
 ) -> mx.array:
     """Eq. 1 of the paper.
 
@@ -147,6 +156,7 @@ def multi_layer_distillation_loss(
             selected=selected,
             mask=mask,
             subtract_target_entropy=subtract_target_entropy,
+            normalise=normalise,
         )
         return loss
 
@@ -158,6 +168,7 @@ def multi_layer_distillation_loss(
             selected=selected,
             mask=mask,
             subtract_target_entropy=subtract_target_entropy,
+            normalise=normalise,
         )
         total = loss if total is None else total + loss
     return total / targets.shape[0]

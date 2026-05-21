@@ -211,6 +211,37 @@ class IndexCacheModel(nn.Module):
         picked = mx.take_along_axis(logp, targets[..., None], axis=-1)
         return -mx.mean(picked)
 
+    def training_loss(
+        self,
+        tokens: mx.array,
+        pattern: LayerPattern | None = None,
+        *,
+        distill_weight: float = 0.0,
+        mode: str = "per_layer",
+        mask: mx.array | None = None,
+        full_sequence: bool = True,
+    ) -> mx.array:
+        """LM loss plus an optional multi-layer distillation term.
+
+        ``distill_weight=0`` reproduces the standard objective.  With a positive
+        weight each retained indexer is also trained against the mean attention
+        distribution of the layers it serves, which is the training-aware
+        IndexCache objective.  ``full_sequence=False`` trains on the answer
+        position only (the toy task's signal; see the README).
+        """
+        pattern = pattern or LayerPattern.all_full(self.cfg.n_layers)
+        if full_sequence:
+            loss = self.loss(tokens, pattern)
+        else:
+            from .task import answer_loss
+
+            loss = answer_loss(self.forward(tokens, pattern)["logits"], tokens)
+        if distill_weight > 0:
+            loss = loss + distill_weight * self.multi_layer_distillation(
+                tokens, pattern, mode=mode, mask=mask
+            )
+        return loss
+
     def distillation_targets(
         self, tokens: mx.array, pattern: LayerPattern
     ) -> tuple[dict[int, mx.array], dict[int, mx.array]]:

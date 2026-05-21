@@ -100,7 +100,7 @@ def test_per_layer_and_averaged_target_modes_have_equal_gradients():
 def test_multi_layer_loss_averages_over_the_served_layers():
     targets = mx.stack([_dist(B=1, L=4), _dist(B=1, L=4)], axis=0)
     logits = mx.zeros((1, 4, 4))
-    loss = multi_layer_distillation_loss(logits, targets, mode="per_layer")
+    loss = multi_layer_distillation_loss(logits, targets, mode="per_layer", normalise=False)
     a, _ = distillation_kl(targets[0], logits)
     b, _ = distillation_kl(targets[1], logits)
     mx.eval(loss, a, b)

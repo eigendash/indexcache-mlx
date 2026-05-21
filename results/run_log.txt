@@ -1,0 +1,146 @@
+IndexCache toy experiment -- cross-layer top-k index reuse
+  model   {'vocab_size': 260, 'd_model': 64, 'n_heads': 4, 'n_layers': 4, 'd_ff': 256, 'max_seq_len': 128, 'top_k': 32, 'window': -1, 'indexer_heads': 2, 'indexer_head_dim': 16}
+  task    multi-key associative recall, 4 key/value pairs drawn from 128 keys, answer at the final position
+  vocab   260 tokens
+  data    train 1000  val 200  calib 72, sequence 128
+  training 800 steps, batch 16, lr 0.003
+  seeds   [0, 1, 2]
+  distillation weight 0.001
+
+================ seed 0 ================
+[1/5] all-Full: every layer keeps its own indexer (DSA baseline)
+    all-Full       step  200/800  loss 2.6679  (3.6s)
+    all-Full       step  400/800  loss 0.9037  (6.5s)
+    all-Full       step  600/800  loss 0.6891  (9.3s)
+    all-Full       step  800/800  loss 0.3951  (12.1s)
+  all-Full held-out loss 0.4431  answer accuracy 0.870  (12.1s)
+  adjacent-layer top-32 overlap: all queries Jaccard 0.485, overlap/k 0.579
+  adjacent-layer overlap, queries with >= 16 candidates: Jaccard 0.412, overlap/k 0.518
+    jaccard 0-1: 0.481
+    jaccard 0-2: 0.488
+    jaccard 0-3: 0.487
+    jaccard 1-2: 0.468
+    jaccard 1-3: 0.533
+    jaccard 2-3: 0.507
+
+[2/5] training-free: reuse the all-Full weights, share indices
+  shared_1_in_2  FSFS  loss 0.4381  accuracy 0.880  indexers -50%
+  shared_1_in_4  FSSS  loss 0.4469  accuracy 0.875  indexers -75%
+
+[3/5] training-free greedy search (Algorithm 1) on the calibration set
+  greedy step 1/3: flip layer 1 -> S (loss 0.4911)  pattern=FSFF
+  greedy step 2/3: flip layer 2 -> S (loss 0.5010)  pattern=FSSF
+  greedy step 3/3: flip layer 3 -> S (loss 0.5098)  pattern=FSSS
+  greedy pattern FSSS  loss 0.4469  accuracy 0.875  (6 calibration forwards)
+
+[4/5] training-aware: train retained indexers against the layers they serve
+    trained_1_in_2 step  200/800  loss 3.0637  (4.6s)
+    trained_1_in_2 step  400/800  loss 1.5663  (9.1s)
+    trained_1_in_2 step  600/800  loss 1.1927  (13.6s)
+    trained_1_in_2 step  800/800  loss 0.6361  (18.1s)
+  trained_1_in_2 FSFS  loss 0.6618  accuracy 0.840  (18.1s)
+    trained_1_in_4 step  200/800  loss 3.3417  (3.9s)
+    trained_1_in_4 step  400/800  loss 2.7944  (7.8s)
+    trained_1_in_4 step  600/800  loss 1.9273  (11.7s)
+    trained_1_in_4 step  800/800  loss 2.2701  (15.7s)
+  trained_1_in_4 FSSS  loss 2.3314  accuracy 0.365  (15.7s)
+
+
+================ seed 1 ================
+[1/5] all-Full: every layer keeps its own indexer (DSA baseline)
+    all-Full       step  200/800  loss 2.4876  (2.8s)
+    all-Full       step  400/800  loss 1.8234  (5.7s)
+    all-Full       step  600/800  loss 0.8981  (8.5s)
+    all-Full       step  800/800  loss 0.2817  (11.4s)
+  all-Full held-out loss 0.5983  answer accuracy 0.825  (11.4s)
+  adjacent-layer top-32 overlap: all queries Jaccard 0.487, overlap/k 0.582
+  adjacent-layer overlap, queries with >= 16 candidates: Jaccard 0.414, overlap/k 0.523
+    jaccard 0-1: 0.485
+    jaccard 0-2: 0.494
+    jaccard 0-3: 0.500
+    jaccard 1-2: 0.522
+    jaccard 1-3: 0.468
+    jaccard 2-3: 0.454
+
+[2/5] training-free: reuse the all-Full weights, share indices
+  shared_1_in_2  FSFS  loss 0.5952  accuracy 0.825  indexers -50%
+  shared_1_in_4  FSSS  loss 0.5878  accuracy 0.810  indexers -75%
+
+[3/5] training-free greedy search (Algorithm 1) on the calibration set
+  greedy step 1/3: flip layer 3 -> S (loss 0.5527)  pattern=FFFS
+  greedy step 2/3: flip layer 2 -> S (loss 0.5431)  pattern=FFSS
+  greedy step 3/3: flip layer 1 -> S (loss 0.5542)  pattern=FSSS
+  greedy pattern FSSS  loss 0.5878  accuracy 0.810  (6 calibration forwards)
+
+[4/5] training-aware: train retained indexers against the layers they serve
+    trained_1_in_2 step  200/800  loss 2.8587  (4.5s)
+    trained_1_in_2 step  400/800  loss 1.5996  (9.0s)
+    trained_1_in_2 step  600/800  loss 1.5182  (13.5s)
+    trained_1_in_2 step  800/800  loss 1.0150  (18.0s)
+  trained_1_in_2 FSFS  loss 1.1550  accuracy 0.615  (18.0s)
+    trained_1_in_4 step  200/800  loss 3.1492  (3.9s)
+    trained_1_in_4 step  400/800  loss 2.9041  (7.8s)
+    trained_1_in_4 step  600/800  loss 2.9706  (11.8s)
+    trained_1_in_4 step  800/800  loss 1.8985  (15.7s)
+  trained_1_in_4 FSSS  loss 1.8028  accuracy 0.365  (15.7s)
+
+
+================ seed 2 ================
+[1/5] all-Full: every layer keeps its own indexer (DSA baseline)
+    all-Full       step  200/800  loss 3.0187  (2.8s)
+    all-Full       step  400/800  loss 1.5626  (5.7s)
+    all-Full       step  600/800  loss 0.8958  (8.5s)
+    all-Full       step  800/800  loss 0.3228  (11.4s)
+  all-Full held-out loss 0.8616  answer accuracy 0.765  (11.4s)
+  adjacent-layer top-32 overlap: all queries Jaccard 0.482, overlap/k 0.573
+  adjacent-layer overlap, queries with >= 16 candidates: Jaccard 0.408, overlap/k 0.513
+    jaccard 0-1: 0.491
+    jaccard 0-2: 0.474
+    jaccard 0-3: 0.506
+    jaccard 1-2: 0.450
+    jaccard 1-3: 0.526
+    jaccard 2-3: 0.506
+
+[2/5] training-free: reuse the all-Full weights, share indices
+  shared_1_in_2  FSFS  loss 0.8605  accuracy 0.755  indexers -50%
+  shared_1_in_4  FSSS  loss 0.8685  accuracy 0.745  indexers -75%
+
+[3/5] training-free greedy search (Algorithm 1) on the calibration set
+  greedy step 1/3: flip layer 1 -> S (loss 0.6393)  pattern=FSFF
+  greedy step 2/3: flip layer 3 -> S (loss 0.6386)  pattern=FSFS
+  greedy step 3/3: flip layer 2 -> S (loss 0.6620)  pattern=FSSS
+  greedy pattern FSSS  loss 0.8685  accuracy 0.745  (6 calibration forwards)
+
+[4/5] training-aware: train retained indexers against the layers they serve
+    trained_1_in_2 step  200/800  loss 3.8896  (4.5s)
+    trained_1_in_2 step  400/800  loss 3.2635  (9.0s)
+    trained_1_in_2 step  600/800  loss 1.6835  (13.5s)
+    trained_1_in_2 step  800/800  loss 2.1210  (18.0s)
+  trained_1_in_2 FSFS  loss 1.5887  accuracy 0.455  (18.0s)
+    trained_1_in_4 step  200/800  loss 3.5055  (3.9s)
+    trained_1_in_4 step  400/800  loss 2.6774  (7.9s)
+    trained_1_in_4 step  600/800  loss 1.6772  (11.8s)
+    trained_1_in_4 step  800/800  loss 1.0126  (15.7s)
+  trained_1_in_4 FSSS  loss 1.4613  accuracy 0.545  (15.7s)
+
+
+[5/5] cost: measured forward time, 16 x 128 tokens
+  all_Full       FFFF  indexers 4/4  prefill     5.79 ms
+  shared_1_in_2  FSFS  indexers 2/4  prefill     5.15 ms
+  shared_1_in_4  FSSS  indexers 1/4  prefill     4.80 ms
+  greedy_selected FSSS  indexers 1/4  prefill     4.83 ms
+  trained_1_in_2 FSFS  indexers 2/4  prefill     5.17 ms
+  trained_1_in_4 FSSS  indexers 1/4  prefill     4.85 ms
+
+summary over 3 seeds
+  configuration    pattern             loss       accuracy  indexers
+  all_Full         FFFF       0.6343+-0.1727   0.820+-0.043        0%
+  shared_1_in_2    FSFS       0.6312+-0.1743   0.820+-0.051       50%
+  shared_1_in_4    FSSS       0.6344+-0.1753   0.810+-0.053       75%
+  greedy_selected  FSSS       0.6344+-0.1753   0.810+-0.053       75%
+  trained_1_in_2   FSFS       1.1352+-0.3787   0.637+-0.158       50%
+  trained_1_in_4   FSSS       1.8652+-0.3580   0.425+-0.085       75%
+
+cross-layer top-32 overlap between adjacent layers (all queries): Jaccard 0.485 +- 0.002, overlap/k 0.578
+cross-layer overlap on queries with >= 16 candidates: Jaccard 0.411 +- 0.002, overlap/k 0.518
+wrote /Users/dash/Documents/dev/ai_papers/indexcache-mlx/results/experiment.json

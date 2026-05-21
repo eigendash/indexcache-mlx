@@ -17,6 +17,8 @@ from .distill import (
     multi_layer_distillation_loss,
 )
 from .greedy import greedy_layer_selection
+from .metrics import filter_queries, indexer_index_cost, overlap_ratio, pairwise_jaccard
+from .task import ANSWER_POSITION, VOCAB_SIZE, TaskConfig, answer_accuracy, answer_loss, build_task
 from .indexer import DSAIndexer, indexer_scores, topk_indices
 from .model import ModelConfig, IndexCacheModel, count_params
 from .pattern import LayerPattern
@@ -35,4 +37,14 @@ __all__ = [
     "distillation_kl",
     "multi_layer_distillation_loss",
     "greedy_layer_selection",
+    "pairwise_jaccard",
+    "filter_queries",
+    "overlap_ratio",
+    "indexer_index_cost",
+    "TaskConfig",
+    "build_task",
+    "answer_loss",
+    "answer_accuracy",
+    "VOCAB_SIZE",
+    "ANSWER_POSITION",
 ]
