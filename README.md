@@ -37,7 +37,7 @@ This is not a reproduction. It is a few hundred thousand parameters on a synthet
 
 ## Experiment
 
-`scripts/train_toy.py` trains the same 4-layer, 64-wide model (about 226k parameters, `top_k=32` of 128, no sliding window) on 1000 generated examples with 4 keys drawn from a 128-key vocabulary, and evaluates on 200 held-out examples. Training is 800 AdamW steps at lr 3e-3, batch 16, for three seeds per configuration, and the table reports mean +- std over those seeds. The all-Full, 1-in-2 and 1-in-4 rows share one trained model per seed; `greedy_selected` and the training-free rows reuse the all-Full weights with a different pattern; the `trained_*` rows are trained from scratch under their own pattern.
+`scripts/train_toy.py` trains the same 4-layer, 64-wide model (about 255k parameters, `top_k=32` of 128, no sliding window) on 1000 generated examples with 4 keys drawn from a 128-key vocabulary, and evaluates on 200 held-out examples. Training is 800 AdamW steps at lr 3e-3, batch 16, for three seeds per configuration, and the table reports mean +- std over those seeds. The all-Full, 1-in-2 and 1-in-4 rows share one trained model per seed; `greedy_selected` and the training-free rows reuse the all-Full weights with a different pattern; the `trained_*` rows are trained from scratch under their own pattern.
 
 | configuration | pattern | held-out loss | answer accuracy | indexers removed |
 |---|---|---:|---:|---:|
